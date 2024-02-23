@@ -18,7 +18,13 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import ATTR_COLOR_PRIMARY, ATTR_ON, ATTR_SEGMENT_ID, DOMAIN
+from .const import (
+    ATTR_COLOR_PRIMARY,
+    ATTR_ON,
+    ATTR_SEGMENT_ID,
+    DOMAIN,
+    LIGHT_CAPABILITIES_COLOR_MODE_MAPPING,
+)
 from .coordinator import WLEDDataUpdateCoordinator
 from .helpers import wled_exception_handler
 from .models import WLEDEntity
@@ -111,8 +117,6 @@ class WLEDSegmentLight(WLEDEntity, LightEntity):
     ) -> None:
         """Initialize WLED segment light."""
         super().__init__(coordinator=coordinator)
-        self._rgbw = coordinator.data.info.leds.rgbw
-        self._wv = coordinator.data.info.leds.wv
         self._segment = segment
 
         # Segment 0 uses a simpler name, which is more natural for when using
@@ -126,11 +130,26 @@ class WLEDSegmentLight(WLEDEntity, LightEntity):
             f"{self.coordinator.data.info.mac_address}_{self._segment}"
         )
 
-        self._attr_color_mode = ColorMode.RGB
-        self._attr_supported_color_modes = {ColorMode.RGB}
-        if self._rgbw and self._wv:
-            self._attr_color_mode = ColorMode.RGBW
-            self._attr_supported_color_modes = {ColorMode.RGBW}
+        # WLED >= v0.13.1, light capabilities per segment
+        if (
+            coordinator.data.info.leds.segment_light_capabilities is not None
+            and (
+                color_modes := LIGHT_CAPABILITIES_COLOR_MODE_MAPPING.get(
+                    coordinator.data.info.leds.segment_light_capabilities[segment]
+                )
+            )
+            is not None
+        ):
+            self._attr_color_mode = color_modes[0]
+            self._attr_supported_color_modes = set(color_modes)
+
+        # WLED < v0.13.1 or unknown color mode combination
+        else:
+            self._attr_color_mode = ColorMode.RGB
+            self._attr_supported_color_modes = {ColorMode.RGB}
+            if coordinator.data.info.leds.rgbw and coordinator.data.info.leds.wv:
+                self._attr_color_mode = ColorMode.RGBW
+                self._attr_supported_color_modes = {ColorMode.RGBW}
 
     @property
     def available(self) -> bool:
